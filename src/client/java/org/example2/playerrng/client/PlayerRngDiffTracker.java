@@ -2,6 +2,7 @@ package org.example2.playerrng.client;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
@@ -11,6 +12,7 @@ public final class PlayerRngDiffTracker {
     private static final long MASK_48 = (1L << 48) - 1;
     private static final int MAX_PREVIOUS_SEEDS = 10;
     private static final int MAX_DIFF_SEARCH = 512;
+    private static final int UNBOUNDED_NEXT_INT_CANDIDATES = 1 << 16;
     private static final Object PREDICTION_LOCK = new Object();
 
     public record PreviousSeedEntry(long seed, int stepsFromCurrent) {}
@@ -28,6 +30,14 @@ public final class PlayerRngDiffTracker {
     private static long predictedSteps = 0L;
     private static String lastPredictedCause = "unknown";
     private static int lastPredictedDelta = 0;
+
+    private static long[] syncCandidatesAfterObservation = new long[0];
+    private static long syncObservationStep = -1L;
+    private static @Nullable Long syncedCurrentSeed = null;
+    private static String syncStatus = "unsynced";
+    private static String lastObservationSource = "unknown";
+    private static int lastObservationValue = 0;
+    private static boolean hasObservation = false;
 
     private PlayerRngDiffTracker() {}
 
@@ -68,9 +78,10 @@ public final class PlayerRngDiffTracker {
             Long baseSeed = predictionBaseSeed;
             Long predictedBefore = predictedSeed;
             predictedSteps += steps;
-            predictedSeed = advanceSeed(predictedSeed, steps);
+            predictedSeed = PlayerRngMath.advance(predictedSeed, steps);
             lastPredictedCause = cause;
             lastPredictedDelta = steps;
+            refreshSyncStateLocked();
 
             PlayerRngFileLogger.log(String.format(
                     "predicted cause=%s delta=+%d current=%s base=%s predicted_before=%s predicted_after=%s predicted_steps=+%d",
@@ -81,6 +92,53 @@ public final class PlayerRngDiffTracker {
                     formatSeed(predictedBefore),
                     formatSeed(predictedSeed),
                     predictedSteps
+            ));
+        }
+    }
+
+    public static void recordUnboundedNextIntObservation(String source, int observedValue) {
+        synchronized (PREDICTION_LOCK) {
+            lastObservationSource = source;
+            lastObservationValue = observedValue;
+            hasObservation = true;
+
+            long observationStep = predictedSteps;
+            if (syncCandidatesAfterObservation.length == 0 || syncObservationStep < 0L) {
+                syncCandidatesAfterObservation = createUnboundedNextIntCandidates(observedValue);
+                syncObservationStep = observationStep;
+            } else {
+                long deltaSteps = observationStep - syncObservationStep;
+                if (deltaSteps < 0L) {
+                    clearSyncStateLocked("observation_step_rewind");
+                    syncCandidatesAfterObservation = createUnboundedNextIntCandidates(observedValue);
+                    syncObservationStep = observationStep;
+                } else {
+                    long[] filteredCandidates = filterObservationCandidates(syncCandidatesAfterObservation, deltaSteps, observedValue);
+                    if (filteredCandidates.length == 0) {
+                        PlayerRngFileLogger.log(String.format(
+                                "sync_observation_mismatch source=%s observed=%s step=+%d action=discard_interval",
+                                source,
+                                formatObservedValue(observedValue),
+                                observationStep
+                        ));
+                        clearSyncStateLocked("observation_mismatch");
+                        syncCandidatesAfterObservation = createUnboundedNextIntCandidates(observedValue);
+                        syncObservationStep = observationStep;
+                    } else {
+                        syncCandidatesAfterObservation = filteredCandidates;
+                        syncObservationStep = observationStep;
+                    }
+                }
+            }
+
+            refreshSyncStateLocked();
+            PlayerRngFileLogger.log(String.format(
+                    "sync_observation source=%s observed=%s step=+%d candidates=%d synced_current=%s",
+                    source,
+                    formatObservedValue(observedValue),
+                    observationStep,
+                    syncCandidatesAfterObservation.length,
+                    formatSeed(syncedCurrentSeed)
             ));
         }
     }
@@ -143,6 +201,11 @@ public final class PlayerRngDiffTracker {
         } else {
             changedThisTick = false;
         }
+
+        synchronized (PREDICTION_LOCK) {
+            refreshSyncStateLocked();
+            validateSyncAgainstCurrentLocked();
+        }
     }
 
     public static void reset() {
@@ -164,20 +227,15 @@ public final class PlayerRngDiffTracker {
             predictedSteps = 0L;
             lastPredictedCause = "unknown";
             lastPredictedDelta = 0;
+            syncCandidatesAfterObservation = new long[0];
+            syncObservationStep = -1L;
+            syncedCurrentSeed = null;
+            syncStatus = "unsynced";
+            lastObservationSource = "unknown";
+            lastObservationValue = 0;
+            hasObservation = false;
         }
         PlayerRngFileLogger.log("reset reason=" + reason);
-    }
-
-    private static long nextSeed(long seed) {
-        return (seed * 0x5DEECE66DL + 0xBL) & MASK_48;
-    }
-
-    private static long advanceSeed(long seed, long steps) {
-        long result = seed;
-        for (long i = 0; i < steps; i++) {
-            result = nextSeed(result);
-        }
-        return result;
     }
 
     private static void initializePrediction(long seed) {
@@ -197,12 +255,79 @@ public final class PlayerRngDiffTracker {
     private static int findForwardDistance(long from, long to, int maxSteps) {
         long s = from;
         for (int i = 1; i <= maxSteps; i++) {
-            s = nextSeed(s);
+            s = PlayerRngMath.nextSeed(s);
             if (s == to) {
                 return i;
             }
         }
         return -1;
+    }
+
+    private static long[] createUnboundedNextIntCandidates(int observedValue) {
+        long[] candidates = new long[UNBOUNDED_NEXT_INT_CANDIDATES];
+        for (int lowBits = 0; lowBits < UNBOUNDED_NEXT_INT_CANDIDATES; lowBits++) {
+            candidates[lowBits] = PlayerRngMath.seedAfterUnboundedNextInt(observedValue, lowBits);
+        }
+        return candidates;
+    }
+
+    private static long[] filterObservationCandidates(long[] candidates, long deltaSteps, int observedValue) {
+        long[] filteredCandidates = new long[candidates.length];
+        int filteredCount = 0;
+        for (long candidate : candidates) {
+            long advanced = PlayerRngMath.advance(candidate, deltaSteps);
+            if (PlayerRngMath.matchesUnboundedNextIntOutput(advanced, observedValue)) {
+                filteredCandidates[filteredCount++] = advanced;
+            }
+        }
+        return Arrays.copyOf(filteredCandidates, filteredCount);
+    }
+
+    private static void refreshSyncStateLocked() {
+        if (syncCandidatesAfterObservation.length == 0 || syncObservationStep < 0L) {
+            syncedCurrentSeed = null;
+            syncStatus = hasObservation ? "unsynced" : "waiting_observation";
+            return;
+        }
+
+        if (syncCandidatesAfterObservation.length == 1) {
+            long deltaFromObservation = predictedSteps - syncObservationStep;
+            if (deltaFromObservation < 0L) {
+                syncedCurrentSeed = null;
+                syncStatus = "unsynced";
+                return;
+            }
+            syncedCurrentSeed = PlayerRngMath.advance(syncCandidatesAfterObservation[0], deltaFromObservation);
+            syncStatus = "resolved";
+            return;
+        }
+
+        syncedCurrentSeed = null;
+        syncStatus = "candidates=" + syncCandidatesAfterObservation.length;
+    }
+
+    private static void validateSyncAgainstCurrentLocked() {
+        if (syncedCurrentSeed == null || currentSeed == null) {
+            return;
+        }
+
+        if (!syncedCurrentSeed.equals(currentSeed)) {
+            PlayerRngFileLogger.log(String.format(
+                    "sync_current_mismatch actual=%s synced=%s predicted_steps=+%d action=discard_interval",
+                    formatSeed(currentSeed),
+                    formatSeed(syncedCurrentSeed),
+                    predictedSteps
+            ));
+            clearSyncStateLocked("current_seed_mismatch");
+        }
+    }
+
+    private static void clearSyncStateLocked(String reason) {
+        syncCandidatesAfterObservation = new long[0];
+        syncObservationStep = -1L;
+        syncedCurrentSeed = null;
+        syncStatus = hasObservation ? "unsynced" : "waiting_observation";
+        PlayerRngFileLogger.log("sync_reset reason=" + reason);
     }
 
     private static void shiftPreviousSeedSteps(int deltaSteps) {
@@ -270,6 +395,51 @@ public final class PlayerRngDiffTracker {
         }
     }
 
+    public static @Nullable Long getSyncedCurrentSeed() {
+        synchronized (PREDICTION_LOCK) {
+            refreshSyncStateLocked();
+            return syncedCurrentSeed;
+        }
+    }
+
+    public static int getSyncCandidateCount() {
+        synchronized (PREDICTION_LOCK) {
+            return syncCandidatesAfterObservation.length;
+        }
+    }
+
+    public static String getSyncStatus() {
+        synchronized (PREDICTION_LOCK) {
+            refreshSyncStateLocked();
+            return syncStatus;
+        }
+    }
+
+    public static String getLastObservationSource() {
+        synchronized (PREDICTION_LOCK) {
+            return lastObservationSource;
+        }
+    }
+
+    public static boolean hasObservation() {
+        synchronized (PREDICTION_LOCK) {
+            return hasObservation;
+        }
+    }
+
+    public static int getLastObservationValue() {
+        synchronized (PREDICTION_LOCK) {
+            return lastObservationValue;
+        }
+    }
+
+    public static boolean syncMatchesCurrent() {
+        synchronized (PREDICTION_LOCK) {
+            refreshSyncStateLocked();
+            return currentSeed != null && syncedCurrentSeed != null && currentSeed.equals(syncedCurrentSeed);
+        }
+    }
+
     public static List<PreviousSeedEntry> getPreviousSeeds() {
         return new ArrayList<>(previousSeeds);
     }
@@ -288,5 +458,9 @@ public final class PlayerRngDiffTracker {
 
     public static String formatSeed(@Nullable Long seed) {
         return seed == null ? "N/A" : String.format("0x%012X", seed);
+    }
+
+    public static String formatObservedValue(int value) {
+        return String.format("0x%08X", value);
     }
 }

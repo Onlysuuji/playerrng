@@ -41,6 +41,10 @@ public final class PlayerRngHudOverlay {
         int lineHeight = 10;
         Long predictedSeed = PlayerRngDiffTracker.getPredictedSeed();
         Long baseSeed = PlayerRngDiffTracker.getPredictionBaseSeed();
+        Long syncedCurrentSeed = PlayerRngDiffTracker.getSyncedCurrentSeed();
+        boolean hasObservation = PlayerRngDiffTracker.hasObservation();
+        boolean syncReady = syncedCurrentSeed != null && PlayerRngDiffTracker.getCurrentSeed() != null;
+        boolean syncMatches = syncReady && PlayerRngDiffTracker.syncMatchesCurrent();
         boolean predictionReady = predictedSeed != null && PlayerRngDiffTracker.getCurrentSeed() != null;
         boolean predictionMatches = predictionReady && PlayerRngDiffTracker.predictionMatchesCurrent();
 
@@ -86,6 +90,27 @@ public final class PlayerRngHudOverlay {
                 y + lineHeight * 5,
                 0xFFAA55
         );
+        context.drawTextWithShadow(
+                client.textRenderer,
+                "Sync Current: " + formatSyncCurrent(syncedCurrentSeed, PlayerRngDiffTracker.getSyncStatus()),
+                x,
+                y + lineHeight * 6,
+                syncedCurrentSeed != null ? 0x55FFAA : 0xAAAAAA
+        );
+        context.drawTextWithShadow(
+                client.textRenderer,
+                "Sync Cand: " + formatSyncCandidateCount(hasObservation, PlayerRngDiffTracker.getSyncCandidateCount()),
+                x,
+                y + lineHeight * 7,
+                0x88DDFF
+        );
+        context.drawTextWithShadow(
+                client.textRenderer,
+                "Sync Compare: " + formatComparisonText(syncReady, syncMatches),
+                x,
+                y + lineHeight * 8,
+                syncMatches ? 0x55FF55 : syncReady ? 0xFF5555 : 0xAAAAAA
+        );
 
         List<PlayerRngDiffTracker.PreviousSeedEntry> previousSeeds = PlayerRngDiffTracker.getPreviousSeeds();
         int previousLines = Math.max(1, previousSeeds.size());
@@ -95,12 +120,12 @@ public final class PlayerRngHudOverlay {
             String stepText = entry != null ? formatStepDistance(entry.stepsFromCurrent()) : "unknown";
             String line = String.format("Prev %d: %s (%s)", i + 1, PlayerRngDiffTracker.formatSeed(seed), stepText);
             int color = i == 0 ? 0xAAAAAA : 0x888888;
-            context.drawTextWithShadow(client.textRenderer, line, x, y + lineHeight * (i + 6), color);
+            context.drawTextWithShadow(client.textRenderer, line, x, y + lineHeight * (i + 9), color);
         }
 
         int steps = PlayerRngDiffTracker.getLastDiffSteps();
         String stepsText = steps >= 0 ? "+" + steps : "unknown";
-        int detailStartY = y + lineHeight * (previousLines + 6);
+        int detailStartY = y + lineHeight * (previousLines + 9);
 
         context.drawTextWithShadow(client.textRenderer, "Diff: " + stepsText, x, detailStartY, 0xFFFF55);
         context.drawTextWithShadow(
@@ -117,8 +142,15 @@ public final class PlayerRngHudOverlay {
                 detailStartY + lineHeight * 2,
                 0xFFAA55
         );
+        context.drawTextWithShadow(
+                client.textRenderer,
+                "Obs: " + formatObservationLine(),
+                x,
+                detailStartY + lineHeight * 3,
+                0xAAFFAA
+        );
 
-        int memoStartY = detailStartY + lineHeight * 4;
+        int memoStartY = detailStartY + lineHeight * 5;
         for (int i = 0; i < MEMO_LINES.length; i++) {
             int color = i == 0 ? 0xFFAA55 : 0xAAFFAA;
             context.drawTextWithShadow(client.textRenderer, MEMO_LINES[i], x, memoStartY + lineHeight * i, color);
@@ -139,6 +171,21 @@ public final class PlayerRngHudOverlay {
 
     private static String formatPredictedDelta(int steps) {
         return steps > 0 ? "+" + steps : "unknown";
+    }
+
+    private static String formatSyncCurrent(Long syncedCurrentSeed, String syncStatus) {
+        return syncedCurrentSeed != null ? PlayerRngDiffTracker.formatSeed(syncedCurrentSeed) : syncStatus;
+    }
+
+    private static String formatSyncCandidateCount(boolean hasObservation, int candidateCount) {
+        return hasObservation ? Integer.toString(candidateCount) : "N/A";
+    }
+
+    private static String formatObservationLine() {
+        if (!PlayerRngDiffTracker.hasObservation()) {
+            return "none";
+        }
+        return PlayerRngDiffTracker.getLastObservationSource() + " " + PlayerRngDiffTracker.formatObservedValue(PlayerRngDiffTracker.getLastObservationValue());
     }
 
     private static String formatComparisonText(boolean predictionReady, boolean predictionMatches) {
