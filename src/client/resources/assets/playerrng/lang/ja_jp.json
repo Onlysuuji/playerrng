@@ -1,0 +1,6 @@
+{
+  "key.playerrng.reset_tracker": "RNG\u30c8\u30e9\u30c3\u30ab\u30fc\u3092\u30ea\u30bb\u30c3\u30c8",
+  "key.playerrng.sprint_toggle_burst": "\u30C0\u30C3\u30B7\u30E5\u5207\u308A\u66FF\u3048 x4",
+  "key.playerrng.right_click_burst": "\u53f3\u30af\u30ea\u30c3\u30af x10",
+  "category.playerrng.controls": "Player RNG"
+}
