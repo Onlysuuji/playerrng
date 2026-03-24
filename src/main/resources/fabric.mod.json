@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "playerrng",
+  "version": "${version}",
+  "name": "playerrng",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/playerrng/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "org.example2.playerrng.client.PlayerrngDataGenerator"
+    ],
+    "client": [
+      "org.example2.playerrng.client.PlayerrngClient"
+    ],
+    "main": [
+      "org.example2.playerrng.Playerrng"
+    ]
+  },
+  "mixins": [
+    "playerrng.mixins.json",
+    {
+      "config": "playerrng.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}

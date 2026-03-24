@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "org.example2.playerrng.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "LocalRandomAccessor",
+    "CheckedRandomAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
