@@ -4,6 +4,21 @@
   "package": "org.example2.playerrng.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "AnvilScreenHandlerMixin",
+    "CrossbowItemMixin",
+    "EntitySprintingParticlesMixin",
+    "EntitySwimSoundMixin",
+    "EntitySwimmingStartMixin",
+    "ExperienceOrbPickupMixin",
+    "LivingEntityConsumptionMixin",
+    "LivingEntityDrownParticlesMixin",
+    "LivingEntityEquipMixin",
+    "LivingEntityHurtSoundMixin",
+    "LivingEntityStatusEffectParticlesMixin",
+    "MinecraftClientInvoker",
+    "PlayerEntityDropMixin",
+    "PlayerEntityXpOrbSelectionMixin",
+    "PlayerEntityEnchantmentCostsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

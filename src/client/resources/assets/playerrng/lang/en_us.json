@@ -1,0 +1,6 @@
+{
+  "key.playerrng.reset_tracker": "Reset RNG tracker",
+  "key.playerrng.sprint_toggle_burst": "Sprint Toggle Burst x4",
+  "key.playerrng.right_click_burst": "Right Click Burst x10",
+  "category.playerrng.controls": "Player RNG"
+}
